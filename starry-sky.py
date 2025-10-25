@@ -7,23 +7,17 @@ import numpy as np
 import argparse
 
 
-# --- Display Config ---
+# Global instances - will be initialised in main()
+rng = None
+config = None
+display = None
 
-WIDTH = 400
-HEIGHT = 400
-SCALE = 1.5
-
-CONTROL_PANEL_WIDTH = 300
-SKY_WIDTH = WIDTH * SCALE
-SKY_HEIGHT = HEIGHT * SCALE
-
-SCREEN_WIDTH = CONTROL_PANEL_WIDTH + SKY_WIDTH
-SCREEN_HEIGHT = SKY_HEIGHT
-
-# --- Simulation Config ---
+# --- Configs ---
 
 @dataclass
-class Config:
+class SimulationConfig:
+    width: int = 400
+    height: int = 400
     brightness_modifier: float = 0.35
     max_brightness: float = 1.0
     min_brightness: float = 0.3
@@ -31,6 +25,30 @@ class Config:
     delay: int = 75  # milliseconds
     gif_duration: int = 3000  # milliseconds, resulting gif will be double this duration due to ping-pong effect
     seed: int = 130388
+
+
+# --- Display Config ---
+
+@dataclass
+class DisplayConfig:
+    scale: float = 1.5
+    control_panel_width: int = 300
+
+    @property
+    def sky_width(self):
+        return config.width * self.scale
+
+    @property
+    def sky_height(self):
+        return config.height * self.scale
+
+    @property
+    def screen_width(self):
+        return self.control_panel_width + self.sky_width
+
+    @property
+    def screen_height(self):
+        return self.sky_height
 
 
 # --- Star Patterns ---
@@ -107,11 +125,6 @@ STAR_PROPERTIES = {
 }
 
 
-# Global instances - will be initialised in main()
-rng = None
-config = None
-
-
 class Star:
    def __init__(self, variant, rng):
     self.variant = variant
@@ -121,6 +134,7 @@ class Star:
 def main():
     global rng
     global config
+    global display
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Generate starry night gifs and interactive visualisations')
@@ -130,8 +144,9 @@ def main():
                         help='Random seed for star generation (0-999999)')
     args = parser.parse_args()
 
-    # Initialise config
-    config = Config()
+    # Initialise configs
+    config = SimulationConfig()
+    display = DisplayConfig()
 
     # Set seed from command line or use configured default
     if args.seed is not None:
@@ -251,10 +266,10 @@ def init_pygame():
     pygame.init()
 
     # Set up display
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    screen = pygame.display.set_mode((int(display.screen_width), int(display.screen_height)))
     pygame.display.set_caption('Starry Night')
 
-    ui_manager = pygame_gui.UIManager((SCREEN_WIDTH, SCREEN_HEIGHT))
+    ui_manager = pygame_gui.UIManager((int(display.screen_width), int(display.screen_height)))
     clock = pygame.time.Clock()
 
     sliders = create_sliders(ui_manager)
@@ -387,11 +402,11 @@ def generate_sky(star_array):
 
 def generate_sky_array(star_array):
     # Create an empty sky array
-    sky_array = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)
+    sky_array = np.zeros((config.height, config.width), dtype=np.uint8)
 
     # Insert stars into the sky array
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
+    for y in range(config.height):
+        for x in range(config.width):
             star = star_array[y, x]
             if star:
                 insert_star(sky_array, star, (y, x))
@@ -405,7 +420,7 @@ def convert_to_surface(sky_array):
 
     surface = pygame.surfarray.make_surface(greyscale_surface)
 
-    scaled_surface = pygame.transform.scale(surface, (SKY_WIDTH, SKY_HEIGHT))
+    scaled_surface = pygame.transform.scale(surface, (int(display.sky_width), int(display.sky_height)))
 
     return scaled_surface
 
@@ -416,10 +431,10 @@ def generate_star_array():
     probabilities = np.array(PROBABILITIES)
 
     # Create an array of stars with random variants based on the specified probabilities
-    star_array = np.empty((HEIGHT, WIDTH), dtype=object)
+    star_array = np.empty((config.height, config.width), dtype=object)
 
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
+    for y in range(config.height):
+        for x in range(config.width):
             variant = rng.choice(variants, p=probabilities)
             star_array[y, x] = Star(variant, rng) if variant != 0 else None
 
@@ -469,11 +484,11 @@ def update_brightness(star_array):
     std_dev = (2 * config.brightness_modifier) / config.spread
 
     # Generate ALL random changes at once (vectorized!)
-    changes = rng.normal(0, std_dev, size=(HEIGHT, WIDTH))
+    changes = rng.normal(0, std_dev, size=(config.height, config.width))
 
     # Update all brightnesses using vectorized operations
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
+    for y in range(config.height):
+        for x in range(config.width):
             star = star_array[y, x]
             if star:
                 star.brightness = np.clip(
@@ -488,10 +503,11 @@ def draw_sky(screen, sky, ui_manager):
     screen.fill((0, 0, 0))
 
     # Draw a divider line between control panel and sky
-    pygame.draw.line(screen, (80, 80, 80), (CONTROL_PANEL_WIDTH, 0), (CONTROL_PANEL_WIDTH, SCREEN_HEIGHT), 2)
+    pygame.draw.line(screen, (80, 80, 80), (display.control_panel_width, 0),
+                     (display.control_panel_width, int(display.screen_height)), 2)
 
     # Draw the starry sky in the right pane
-    screen.blit(sky, (CONTROL_PANEL_WIDTH, 0))
+    screen.blit(sky, (display.control_panel_width, 0))
 
     # Draw UI elements (controls in left pane)
     ui_manager.draw_ui(screen)
