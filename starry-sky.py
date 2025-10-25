@@ -28,7 +28,7 @@ class Config:
     max_brightness: float = 1.0
     min_brightness: float = 0.3
     spread: int = 15  # Higher values result in less spread
-    speed: int = 75  # milliseconds
+    delay: int = 75  # milliseconds
     gif_duration: int = 3000  # milliseconds, resulting gif will be double this duration due to ping-pong effect
     seed: int = 130388
 
@@ -167,7 +167,7 @@ def generate_gif(star_array):
 
     # Calculate number of frames for desired duration
     duration_ms = config.gif_duration
-    num_frames = duration_ms // config.speed
+    num_frames = duration_ms // config.delay
 
     # Make a deep copy of the star array so gif and display don't interfere
     # star_array = copy.deepcopy(original_star_array)
@@ -206,7 +206,7 @@ def generate_gif(star_array):
         filename,
         save_all=True,
         append_images=all_frames[1:],
-        duration=config.speed,
+        duration=config.delay,
         loop=0
     )
 
@@ -220,8 +220,11 @@ def run_interactive(star_array):
     screen, ui_manager, sliders, clock = init_pygame()
 
     running = True
+    last_update_time = 0
+
     while running:
         time_delta = clock.tick(60)/1000.0
+        current_time = pygame.time.get_ticks()
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -234,10 +237,13 @@ def run_interactive(star_array):
 
         ui_manager.update(time_delta)
 
+        # Update brightness at configured speed (independent of UI framerate)
+        if current_time - last_update_time >= config.delay:
+            update_brightness(star_array)
+            last_update_time = current_time
+
         sky = generate_sky(star_array)
         draw_sky(screen, sky, ui_manager)
-        update_brightness(star_array)
-        pygame.time.delay(config.speed)
 
     pygame.quit()
 
@@ -360,13 +366,13 @@ def create_sliders(ui_manager):
     )
     sliders['speed'] = pygame_gui.elements.UIHorizontalSlider(
         relative_rect=pygame.Rect((x_margin, y_offset + 25), (slider_width, 20)),
-        start_value=config.speed,
+        start_value=config.delay,
         value_range=(50, 2000),
         manager=ui_manager
     )
     sliders['speed_label'] = pygame_gui.elements.UILabel(
         relative_rect=pygame.Rect((x_margin + slider_width + 10, y_offset + 25), (value_label_width, 20)),
-        text=f'{config.speed}',
+        text=f'{config.delay}',
         manager=ui_manager
     )
 
@@ -454,19 +460,27 @@ def handle_slider_event(event, sliders):
         config.spread = int(event.value)
         sliders['spread_label'].set_text(f'{int(event.value)}')
     elif event.ui_element == sliders['speed']:
-        config.speed = int(event.value)
+        config.delay = int(event.value)
         sliders['speed_label'].set_text(f'{int(event.value)}')
 
 
 def update_brightness(star_array):
+    # Calculate std_dev once
+    std_dev = (2 * config.brightness_modifier) / config.spread
+
+    # Generate ALL random changes at once (vectorized!)
+    changes = rng.normal(0, std_dev, size=(HEIGHT, WIDTH))
+
+    # Update all brightnesses using vectorized operations
     for y in range(HEIGHT):
         for x in range(WIDTH):
             star = star_array[y, x]
             if star:
-                # change = rng_instance.uniform(-config.brightness_modifier, config.brightness_modifier)
-                std_dev = (config.brightness_modifier - (-config.brightness_modifier)) / config.spread  # This will adjust the spread
-                change = rng.normal(0, std_dev)
-                star.brightness = np.clip(star.brightness + change, config.min_brightness, config.max_brightness)
+                star.brightness = np.clip(
+                    star.brightness + changes[y, x],
+                    config.min_brightness,
+                    config.max_brightness
+                )
 
 
 def draw_sky(screen, sky, ui_manager):
