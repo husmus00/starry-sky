@@ -1,28 +1,40 @@
 import pygame
+import pygame_gui
 import numpy as np
 import time
 from dataclasses import dataclass
 
 
+# --- Display ---
+
+WIDTH = 400
+HEIGHT = 400
+SCALE = 1.5
+
+CONTROL_PANEL_WIDTH = 300
+SKY_WIDTH = WIDTH * SCALE
+SKY_HEIGHT = HEIGHT * SCALE
+
+SCREEN_WIDTH = CONTROL_PANEL_WIDTH + SKY_WIDTH
+SCREEN_HEIGHT = SKY_HEIGHT
+
 # --- Config ---
 
-WIDTH = 150
-HEIGHT = 150
-SCALE = 3
+class Config:
+    def __init__(self):
+        self.brightness_modifier = 0.35
+        self.max_brightness = 1.0
+        self.min_brightness = 0.3
+        self.spread = 20  # Higher values result in less spread
+        self.speed = 75  # milliseconds
 
-SCREEN_WIDTH = WIDTH * SCALE
-SCREEN_HEIGHT = HEIGHT * SCALE
-
-STAR_VARIANTS = [0, 1, 2, 3, 4]  # None, Small, Medium, Large
-PROBABILITIES = [0.9885, 0.004, 0.004, 0.003, 0.0005]
-
-BRIGHTNESS_MODIFIER = 0.35
-MAX_BRIGHTNESS = 1.0
-MIN_BRIGHTNESS = 0.3
-SPREAD = 12  # Higher values result in less spread
-SPEED = 800 # milliseconds
+config = Config()
 
 # --- Star Patterns ---
+
+# Sum should be 1.0
+PROBABILITIES = [0.99201, 0.003, 0.003, 0.001, 0.0006, 0.00036, 0.00001, 0.00002]
+STAR_VARIANTS = [0, 1, 2, 3, 4, 5, 6, 7]
 
 DIM_STAR = [128]
 
@@ -32,6 +44,16 @@ MEDIUM_STAR = [
     [0,128,0],
     [128,255,128],
     [0,128,0]
+]
+
+MEDIUM_2_STAR = [
+    [0,0,0,128,0,0,0],
+    [0,0,0,0,0,0,0],
+    [0,0,0,255,0,0,0],
+    [128,0,255,255,255,0,128],
+    [0,0,0,255,0,0,0],
+    [0,0,0,0,0,0,0],
+    [0,0,0,128,0,0,0]
 ]
 
 LARGE_STAR = [
@@ -44,35 +66,74 @@ LARGE_STAR = [
     [0,0,0,64,0,0,0]
 ]
 
+LARGE_STAR_2 = [
+    [0,0,0,0,64,0,0,0,0],
+    [0,0,0,0,128,0,0,0,0],
+    [0,0,0,192,192,192,0,0,0],
+    [0,0,192,192,255,192,192,0,0],
+    [64,128,192,255,255,255,192,128,64],
+    [0,0,192,192,255,192,192,0,0],
+    [0,0,0,192,192,192,0,0,0],
+    [0,0,0,0,128,0,0,0,0],
+    [0,0,0,0,64,0,0,0,0]
+]
+
+EXTRA_LARGE_STAR = [
+    [0,0,0,0,0,32,0,0,0,0,0],
+    [0,0,0,0,0,64,0,0,0,0,0],
+    [0,0,0,0,64,128,64,0,0,0,0],
+    [0,0,0,64,128,192,128,64,0,0,0],
+    [0,0,64,128,192,255,192,128,64,0,0],
+    [32,64,128,192,255,255,255,192,128,64,32],
+    [0,0,64,128,192,255,192,128,64,0,0],
+    [0,0,0,64,128,192,128,64,0,0,0],
+    [0,0,0,0,64,128,64,0,0,0,0],
+    [0,0,0,0,0,64,0,0,0,0,0],
+    [0,0,0,0,0,32,0,0,0,0,0]
+]
+
+
 STAR_PROPERTIES = {
     1: {'size': 1, 'pattern': DIM_STAR},
     2: {'size': 1, 'pattern': SMALL_STAR},
     3: {'size': 3, 'pattern': MEDIUM_STAR},
-    4: {'size': 7, 'pattern': LARGE_STAR}
+    4: {'size': 7, 'pattern': MEDIUM_2_STAR},
+    5: {'size': 7, 'pattern': LARGE_STAR},
+    6: {'size': 9, 'pattern': LARGE_STAR_2},
+    7: {'size': 11, 'pattern': EXTRA_LARGE_STAR},
 }
 
 
 class Star:
    def __init__(self, variant):
     self.variant = variant
-    self.brightness = np.random.uniform(MIN_BRIGHTNESS, MAX_BRIGHTNESS) if variant != 0 else 0.0
+    self.brightness = np.random.uniform(config.min_brightness, config.max_brightness) if variant != 0 else 0.0
     
 
 def main():
-    screen = init_pygame()
+    screen, ui_manager, sliders, clock = init_pygame()
     star_array = generate_star_array()
 
     running = True
     while running:
+        time_delta = clock.tick(60)/1000.0
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-        
+
+            if event.type == pygame_gui.UI_HORIZONTAL_SLIDER_MOVED:
+                handle_slider_event(event, sliders)
+
+            ui_manager.process_events(event)
+
+        ui_manager.update(time_delta)
+
         # sky = update_sky(sky)
         sky = generate_sky(star_array)
-        draw_sky(screen, sky)
+        draw_sky(screen, sky, ui_manager)
         update_brightness(star_array)
-        pygame.time.delay(SPEED)
+        pygame.time.delay(config.speed)
 
 
 def init_pygame():
@@ -81,7 +142,133 @@ def init_pygame():
 
     # Set up display
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    return screen
+    pygame.display.set_caption('Starry Night')
+
+    # Create UI Manager
+    ui_manager = pygame_gui.UIManager((SCREEN_WIDTH, SCREEN_HEIGHT))
+    clock = pygame.time.Clock()
+
+    # Create sliders
+    sliders = create_sliders(ui_manager)
+
+    return screen, ui_manager, sliders, clock
+
+
+def create_sliders(ui_manager):
+    # Left control panel layout
+    x_margin = 15
+    y_start = 20
+    y_spacing = 70
+    slider_width = 220
+    label_width = 270
+    value_label_width = 60
+
+    sliders = {}
+    y_offset = y_start
+
+    # Title
+    pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin, y_offset), (label_width, 30)),
+        text='Controls',
+        manager=ui_manager
+    )
+    y_offset += 50
+
+    # Brightness Modifier slider
+    pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin, y_offset), (label_width, 20)),
+        text='Brightness Modifier:',
+        manager=ui_manager
+    )
+    sliders['brightness_modifier'] = pygame_gui.elements.UIHorizontalSlider(
+        relative_rect=pygame.Rect((x_margin, y_offset + 25), (slider_width, 20)),
+        start_value=config.brightness_modifier,
+        value_range=(0.0, 1.0),
+        manager=ui_manager
+    )
+    sliders['brightness_modifier_label'] = pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin + slider_width + 10, y_offset + 25), (value_label_width, 20)),
+        text=f'{config.brightness_modifier:.2f}',
+        manager=ui_manager
+    )
+
+    # Max Brightness slider
+    y_offset += y_spacing
+    pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin, y_offset), (label_width, 20)),
+        text='Max Brightness:',
+        manager=ui_manager
+    )
+    sliders['max_brightness'] = pygame_gui.elements.UIHorizontalSlider(
+        relative_rect=pygame.Rect((x_margin, y_offset + 25), (slider_width, 20)),
+        start_value=config.max_brightness,
+        value_range=(0.1, 1.0),
+        manager=ui_manager
+    )
+    sliders['max_brightness_label'] = pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin + slider_width + 10, y_offset + 25), (value_label_width, 20)),
+        text=f'{config.max_brightness:.2f}',
+        manager=ui_manager
+    )
+
+    # Min Brightness slider
+    y_offset += y_spacing
+    pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin, y_offset), (label_width, 20)),
+        text='Min Brightness:',
+        manager=ui_manager
+    )
+    sliders['min_brightness'] = pygame_gui.elements.UIHorizontalSlider(
+        relative_rect=pygame.Rect((x_margin, y_offset + 25), (slider_width, 20)),
+        start_value=config.min_brightness,
+        value_range=(0.0, 1.0),
+        manager=ui_manager
+    )
+    sliders['min_brightness_label'] = pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin + slider_width + 10, y_offset + 25), (value_label_width, 20)),
+        text=f'{config.min_brightness:.2f}',
+        manager=ui_manager
+    )
+
+    # Spread slider
+    y_offset += y_spacing
+    pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin, y_offset), (label_width, 20)),
+        text='Spread:',
+        manager=ui_manager
+    )
+    sliders['spread'] = pygame_gui.elements.UIHorizontalSlider(
+        relative_rect=pygame.Rect((x_margin, y_offset + 25), (slider_width, 20)),
+        start_value=config.spread,
+        value_range=(1, 50),
+        manager=ui_manager
+    )
+    sliders['spread_label'] = pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin + slider_width + 10, y_offset + 25), (value_label_width, 20)),
+        text=f'{config.spread}',
+        manager=ui_manager
+    )
+
+    # Speed slider
+    y_offset += y_spacing
+    pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin, y_offset), (label_width, 20)),
+        text='Speed (ms):',
+        manager=ui_manager
+    )
+    sliders['speed'] = pygame_gui.elements.UIHorizontalSlider(
+        relative_rect=pygame.Rect((x_margin, y_offset + 25), (slider_width, 20)),
+        start_value=config.speed,
+        value_range=(50, 2000),
+        manager=ui_manager
+    )
+    sliders['speed_label'] = pygame_gui.elements.UILabel(
+        relative_rect=pygame.Rect((x_margin + slider_width + 10, y_offset + 25), (value_label_width, 20)),
+        text=f'{config.speed}',
+        manager=ui_manager
+    )
+
+    return sliders
 
 
 def generate_sky(star_array):
@@ -111,7 +298,7 @@ def convert_to_surface(sky_array):    # Convert to a 3D array for Pygame (R, G, 
     surface = pygame.surfarray.make_surface(greyscale_surface)
 
     # Scale the surface
-    scaled_surface = pygame.transform.scale(surface, (SCREEN_WIDTH, SCREEN_HEIGHT))
+    scaled_surface = pygame.transform.scale(surface, (SKY_WIDTH, SKY_HEIGHT))
 
     return scaled_surface
 
@@ -146,7 +333,28 @@ def insert_star(sky, star, position):
 
     # Ensure the small array fits within the large array bounds
     if (y + star_height <= sky.shape[0]) and (x + star_width <= sky.shape[1]):
-        sky[y:y + star_height, x:x + star_width] = star_pixel_array
+        # sky[y:y + star_height, x:x + star_width] = star_pixel_array
+        # Insert only non-zero values from the small array
+        sky[y:y + star_height, x:x + star_width] = np.where(star_pixel_array != 0, star_pixel_array, sky[y:y + star_height, x:x + star_width])
+
+
+def handle_slider_event(event, sliders):
+    """Update config values based on slider movement"""
+    if event.ui_element == sliders['brightness_modifier']:
+        config.brightness_modifier = event.value
+        sliders['brightness_modifier_label'].set_text(f'{event.value:.2f}')
+    elif event.ui_element == sliders['max_brightness']:
+        config.max_brightness = event.value
+        sliders['max_brightness_label'].set_text(f'{event.value:.2f}')
+    elif event.ui_element == sliders['min_brightness']:
+        config.min_brightness = event.value
+        sliders['min_brightness_label'].set_text(f'{event.value:.2f}')
+    elif event.ui_element == sliders['spread']:
+        config.spread = int(event.value)
+        sliders['spread_label'].set_text(f'{int(event.value)}')
+    elif event.ui_element == sliders['speed']:
+        config.speed = int(event.value)
+        sliders['speed_label'].set_text(f'{int(event.value)}')
 
 
 def update_brightness(star_array):
@@ -154,15 +362,25 @@ def update_brightness(star_array):
         for x in range(WIDTH):
             star = star_array[y, x]
             if star.variant != 0:
-                # change = np.random.uniform(-BRIGHTNESS_MODIFIER, BRIGHTNESS_MODIFIER)
-                std_dev =(BRIGHTNESS_MODIFIER - (-BRIGHTNESS_MODIFIER)) / SPREAD  # This will adjust the spread
+                # change = np.random.uniform(-config.brightness_modifier, config.brightness_modifier)
+                std_dev = (config.brightness_modifier - (-config.brightness_modifier)) / config.spread  # This will adjust the spread
                 change = np.random.normal(0, std_dev)
-                star.brightness = np.clip(star.brightness + change, MIN_BRIGHTNESS, MAX_BRIGHTNESS)
+                star.brightness = np.clip(star.brightness + change, config.min_brightness, config.max_brightness)
 
 
-def draw_sky(screen, sky):
-    #surface = pygame.surfarray.make_surface(sky)
-    screen.blit(sky, (0, 0))
+def draw_sky(screen, sky, ui_manager):
+    # Fill background
+    screen.fill((0, 0, 0))
+
+    # Draw a divider line between control panel and sky
+    pygame.draw.line(screen, (80, 80, 80), (CONTROL_PANEL_WIDTH, 0), (CONTROL_PANEL_WIDTH, SCREEN_HEIGHT), 2)
+
+    # Draw the starry sky in the right pane
+    screen.blit(sky, (CONTROL_PANEL_WIDTH, 0))
+
+    # Draw UI elements (controls in left pane)
+    ui_manager.draw_ui(screen)
+
     pygame.display.flip()
 
 if __name__=='__main__':
