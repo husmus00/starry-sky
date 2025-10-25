@@ -1,8 +1,10 @@
+from dataclasses import dataclass
+from datetime import datetime
+from PIL import Image
 import pygame
 import pygame_gui
 import numpy as np
-from PIL import Image
-from datetime import datetime
+import argparse
 
 
 # --- Display Config ---
@@ -20,21 +22,16 @@ SCREEN_HEIGHT = SKY_HEIGHT
 
 # --- Simulation Config ---
 
+@dataclass
 class Config:
-    def __init__(self):
-        self.brightness_modifier = 0.35
-        self.max_brightness = 1.0
-        self.min_brightness = 0.3
-        self.spread = 15 # Higher values result in less spread
-        self.speed = 75  # milliseconds
-        self.gif_duration = 3000 # milliseconds, resulting gif will be double this duration due to ping-pong effect
-        self.seed = 130388  # Not used currently
+    brightness_modifier: float = 0.35
+    max_brightness: float = 1.0
+    min_brightness: float = 0.3
+    spread: int = 15  # Higher values result in less spread
+    speed: int = 75  # milliseconds
+    gif_duration: int = 3000  # milliseconds, resulting gif will be double this duration due to ping-pong effect
+    seed: int = 130388
 
-
-config = Config()
-
-# Global RNG instance - will be initialised in main()
-rng = None
 
 # --- Star Patterns ---
 
@@ -110,6 +107,11 @@ STAR_PROPERTIES = {
 }
 
 
+# Global instances - will be initialised in main()
+rng = None
+config = None
+
+
 class Star:
    def __init__(self, variant, rng):
     self.variant = variant
@@ -118,20 +120,103 @@ class Star:
 
 def main():
     global rng
+    global config
 
-    # Initialise seed and RNG
-    if config.seed is None:
-        # Use default_rng to generate a random seed
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Generate starry night gifs and interactive visualisations')
+    parser.add_argument('-i', '--interactive', action='store_true',
+                        help='Run interactive window (without generating gif)')
+    parser.add_argument('-s', '--seed', type=int, default=None,
+                        help='Random seed for star generation (0-999999)')
+    args = parser.parse_args()
+
+    # Initialise config
+    config = Config()
+
+    # Set seed from command line or use configured default
+    if args.seed is not None:
+        # Validate seed bounds
+        if not 0 <= args.seed <= 999999:
+            print(f"Error: Seed must be between 0 and 999999")
+            return
+        config.seed = args.seed
+    elif config.seed is None:
+        # Generate random seed
         temp_rng = np.random.default_rng()
         config.seed = temp_rng.integers(0, 1000000)
 
     print(f"Using random seed: {config.seed}")
     rng = np.random.default_rng(config.seed)
 
+    # Generate star array
     star_array = generate_star_array()
 
-    generate_gif(star_array)
+    if args.interactive:
+        # Run interactive mode only
+        run_interactive(star_array)
+    else:
+        # Generate gif (default behaviour)
+        generate_gif(star_array)
 
+
+def generate_gif(star_array):
+    """
+    Generate a gif of the starry sky and save it with a timestamp
+    """
+    print(f"Generating {config.gif_duration * 2} ms gif...")
+
+    # Calculate number of frames for desired duration
+    duration_ms = config.gif_duration
+    num_frames = duration_ms // config.speed
+
+    # Make a deep copy of the star array so gif and display don't interfere
+    # star_array = copy.deepcopy(original_star_array)
+
+    # Capture frames
+    frames = []
+    for i in range(num_frames):
+        # Generate sky array (not the pygame surface)
+        sky_array = generate_sky_array(star_array)
+
+        # Transpose to match pygame's coordinate system
+        # pygame uses (width, height) and transposes, PIL uses (height, width)
+        sky_array_transposed = sky_array.T
+
+        # Convert to RGB format for PIL
+        rgb_array = np.stack((sky_array_transposed,) * 3, axis=-1)
+
+        # Create PIL Image
+        img = Image.fromarray(rgb_array.astype(np.uint8))
+        frames.append(img)
+
+        # Update brightness for next frame using the gif's RNG
+        update_brightness(star_array)
+
+    # Create ping-pong effect: forward then backward
+    # Append frames in reverse (excluding first and last to avoid duplicates)
+    reversed_frames = frames[-2:0:-1]
+    all_frames = frames + reversed_frames
+
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"starry-sky-{timestamp}-seed-{config.seed}.gif"
+
+    # Save as animated gif
+    all_frames[0].save(
+        filename,
+        save_all=True,
+        append_images=all_frames[1:],
+        duration=config.speed,
+        loop=0
+    )
+
+    print(f"GIF saved as: {filename}")
+
+
+def run_interactive(star_array):
+    """
+    Run the interactive pygame window with sliders
+    """
     screen, ui_manager, sliders, clock = init_pygame()
 
     running = True
@@ -149,12 +234,12 @@ def main():
 
         ui_manager.update(time_delta)
 
-        # sky = update_sky(sky)
         sky = generate_sky(star_array)
         draw_sky(screen, sky, ui_manager)
         update_brightness(star_array)
         pygame.time.delay(config.speed)
 
+    pygame.quit()
 
 def init_pygame():
     pygame.init()
@@ -398,64 +483,7 @@ def draw_sky(screen, sky, ui_manager):
     ui_manager.draw_ui(screen)
 
     pygame.display.flip()
-
-
-def generate_gif(star_array):
-    """
-    Generate a gif of the starry sky and save it with a timestamp
-    """
-    print(f"Generating {config.gif_duration * 2} ms gif...")
-
-    # Calculate number of frames for desired duration
-    duration_ms = config.gif_duration
-    num_frames = duration_ms // config.speed
-
-    # Make a deep copy of the star array so gif and display don't interfere
-    # star_array = copy.deepcopy(original_star_array)
-
-    # Capture frames
-    frames = []
-    for i in range(num_frames):
-        # Generate sky array (not the pygame surface)
-        sky_array = generate_sky_array(star_array)
-
-        # Transpose to match pygame's coordinate system
-        # pygame uses (width, height) and transposes, PIL uses (height, width)
-        sky_array_transposed = sky_array.T
-
-        # Convert to RGB format for PIL
-        rgb_array = np.stack((sky_array_transposed,) * 3, axis=-1)
-
-        # Create PIL Image
-        img = Image.fromarray(rgb_array.astype(np.uint8))
-        frames.append(img)
-
-        # Update brightness for next frame using the gif's RNG
-        update_brightness(star_array)
-
-    # Create ping-pong effect: forward then backward
-    # Append frames in reverse (excluding first and last to avoid duplicates)
-    reversed_frames = frames[-2:0:-1]
-    all_frames = frames + reversed_frames
-
-    # Generate filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    filename = f"starry-sky-{timestamp}-seed-{config.seed}.gif"
-
-    # Save as animated gif
-    all_frames[0].save(
-        filename,
-        save_all=True,
-        append_images=all_frames[1:],
-        duration=config.speed,
-        loop=0
-    )
-
-    print(f"GIF saved as: {filename}")
     
 
 if __name__=='__main__':
     main()
-
-# Quit Pygame
-pygame.quit()
