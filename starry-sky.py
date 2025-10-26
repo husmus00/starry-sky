@@ -24,7 +24,7 @@ class SimulationConfig:
     spread: int = 15  # Higher values result in less spread
     delay: int = 75  # milliseconds
     gif_duration: int = 3000  # milliseconds, resulting gif will be double this duration due to ping-pong effect
-    seed: int = 130388
+    seed: int = None
 
 
 # --- Display Config ---
