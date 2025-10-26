@@ -21,4 +21,4 @@ starry-sky.py -i -s 130388
 
 ## Interactive Mode
 
-The interactive mode allows the user to modify simulation parameters, observing changes in real time.
+Interactive mode allows the user to modify simulation parameters, observing changes in real time.
